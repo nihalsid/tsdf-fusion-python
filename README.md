@@ -1,6 +1,6 @@
 # Volumetric TSDF Fusion of RGB-D Images in Python
 
-<img src="images/fusion-movie.gif" height=250px align="right"/>
+<img src="resources/fusion-movie.gif" height=250px align="right"/>
 
 This is a lightweight python script that fuses multiple registered color and depth images into a projective truncated signed distance function (TSDF) volume, which can then be used to create high quality 3D surface meshes and point clouds. Tested on Ubuntu 16.04.
 

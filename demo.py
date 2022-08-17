@@ -6,9 +6,6 @@ import time
 import cv2
 import numpy as np
 
-import fusion
-
-
 if __name__ == "__main__":
   # ======================================================================================================== #
   # (Optional) This is an example of how to compute the 3D bounds
