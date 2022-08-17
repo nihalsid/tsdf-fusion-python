@@ -156,14 +156,14 @@ def fuse_room_semantics(vol_bnds, sem_dir, mask_dir, depth_dir, annot_dir, voxel
     return sdf_vol, col_vol, tsdf_vol._vol_origin, vol_bnds[:, 1]
 
 
-def run_fuse_room_colors_vfront(room_root, resolution):
+def run_fuse_room_colors_vfront(room_root, resolution, max_depth):
     vol_bnds = get_volume_bounds(room_root / "rgb", room_root / "room_mask", room_root / "depth_npz", room_root / "annotation", max_depth, resolution)
     sdf_vol, col_vol, vol_origin, vol_end = fuse_room_colors(vol_bnds, room_root / "rgb", room_root / "room_mask", room_root / "depth_npz", room_root / "annotation", resolution)
     Path(room_root / "sdf").mkdir(exist_ok=True)
     np.savez_compressed(room_root / "sdf" / f"{resolution:.2f}.npz", sdf=sdf_vol, color=col_vol, volume_origin=vol_origin, voxel_size=resolution, volume_end=vol_end)
 
 
-def run_fuse_room_semantics_vfront(room_root, resolution):
+def run_fuse_room_semantics_vfront(room_root, resolution, max_depth):
     vol_bnds = get_volume_bounds(room_root / "rgb", room_root / "room_mask", room_root / "depth_npz", room_root / "annotation", max_depth, resolution)
     sdf_vol, sem_vol, vol_origin, vol_end = fuse_room_semantics(vol_bnds, room_root / "sem", room_root / "room_mask", room_root / "depth_npz", room_root / "annotation", resolution)
     col_vol = np.load(room_root / "sdf" / f"{resolution:.2f}.npz")['color']
@@ -172,8 +172,8 @@ def run_fuse_room_semantics_vfront(room_root, resolution):
 
 def run_fuse_colors_and_semantics(room_root, resolution, max_depth):
     vol_bnds = get_volume_bounds(room_root / "rgb", room_root / "room_mask", room_root / "depth_npz", room_root / "annotation", max_depth, resolution)
-    sdf_vol, col_vol, vol_origin, vol_end = fuse_room_colors(vol_bnds, room_root / "rgb", room_root / "room_mask", room_root / "depth_npz", room_root / "annotation", resolution)
-    _, sem_vol, _, _ = fuse_room_semantics(vol_bnds, room_root / "sem", room_root / "room_mask", room_root / "depth_npz", room_root / "annotation", resolution)
+    sdf_vol, col_vol, vol_origin, vol_end = fuse_room_colors(np.copy(vol_bnds), room_root / "rgb", room_root / "room_mask", room_root / "depth_npz", room_root / "annotation", resolution)
+    _, sem_vol, _, _ = fuse_room_semantics(np.copy(vol_bnds), room_root / "sem", room_root / "room_mask", room_root / "depth_npz", room_root / "annotation", resolution)
     np.savez_compressed(room_root / "sdf" / f"{resolution:.2f}.npz", sdf=sdf_vol, color=col_vol, semantics=sem_vol.argmax(0), volume_origin=vol_origin, voxel_size=resolution, volume_end=vol_end)
 
 
@@ -188,5 +188,5 @@ if __name__ == "__main__":
     _resolution = 0.05
     _max_depth = 5
     _root = Path("/home/yawarnihal/workspace/nerf-lightning/data/vfront/00154c06-2ee2-408a-9664-b8fd74742897/LivingRoom-17888/")
-    # run_fuse_colors_and_semantics(root, _resolution, _max_depth)
+    # run_fuse_colors_and_semantics(_root, _resolution, _max_depth)
     run_fuse_instances(_root, _resolution)
