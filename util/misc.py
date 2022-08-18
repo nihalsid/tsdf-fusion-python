@@ -11,8 +11,7 @@ def create_box(position, extent):
     return mesh
 
 
-def erode_mask(mask):
-    kernel_size = 3
+def erode_mask(mask, kernel_size=3):
     element = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * kernel_size + 1, 2 * kernel_size + 1), (kernel_size, kernel_size))
     mask = cv2.erode(mask, element)
     return mask

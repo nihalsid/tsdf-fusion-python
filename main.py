@@ -12,13 +12,9 @@ from util.front_to_nyu_subset import read_front_semantics
 from util.misc import erode_mask, create_box, meshwrite, pcwrite
 
 
-def get_volume_bounds(image_dir, mask_dir, depth_dir, annot_dir, max_depth, voxel_size):
+def get_volume_bounds(masks, depths, annots, max_depth, voxel_size):
     print("Estimating voxel volume bounds...")
-    images = sorted([x for x in Path(image_dir).iterdir()], key=lambda x: x.name)
-    masks = [Path(mask_dir) / x.name for x in images]
-    annots = [Path(annot_dir) / f"{x.stem}.pkl" for x in images]
-    depths = [Path(depth_dir) / f"{x.stem}.npz" for x in images]
-    n_imgs = len(images)
+    n_imgs = len(masks)
     vol_bnds = np.zeros((3, 2))
 
     depth_im_0 = np.load(str(depths[0]), -1)['arr'].astype(float)
@@ -44,17 +40,11 @@ def get_volume_bounds(image_dir, mask_dir, depth_dir, annot_dir, max_depth, voxe
             vol_bnds[:, 1] = np.maximum(vol_bnds[:, 1], np.amax(world_point, axis=1))
     vol_bnds[:, 0] -= 5 * voxel_size
     vol_bnds[:, 1] += 5 * voxel_size
-    (image_dir.parent / "sdf" / "visualization").mkdir(exist_ok=True, parents=True)
-    create_box((vol_bnds[:, 1] + vol_bnds[:, 0]) / 2, vol_bnds[:, 1] - vol_bnds[:, 0]).export(image_dir.parent / "sdf" / "visualization" / "bounds.obj")
     return vol_bnds
 
 
-def fuse_room_colors(vol_bnds, image_dir, mask_dir, depth_dir, annot_dir, voxel_size):
+def fuse_room_colors(rootdir, vol_bnds, images, masks, depths, annots, vis_dirname, voxel_size):
     from fusion import color_fusion
-    images = sorted([x for x in Path(image_dir).iterdir()], key=lambda x: x.name)
-    masks = [Path(mask_dir) / x.name for x in images]
-    annots = [Path(annot_dir) / f"{x.stem}.pkl" for x in images]
-    depths = [Path(depth_dir) / f"{x.stem}.npz" for x in images]
     n_imgs = len(images)
     print("Initializing voxel volume...")
     tsdf_vol = color_fusion.TSDFVolume(vol_bnds, voxel_size, use_gpu=True)
@@ -81,15 +71,15 @@ def fuse_room_colors(vol_bnds, image_dir, mask_dir, depth_dir, annot_dir, voxel_
 
     # Get mesh from voxel volume and save to disk (can be viewed with Meshlab)
     print("Saving mesh...")
-    (image_dir.parent / "sdf" / "visualization").mkdir(exist_ok=True, parents=True)
+    (rootdir / "sdf" / vis_dirname).mkdir(exist_ok=True, parents=True)
     verts, verts_vox, faces, norms, colors = tsdf_vol.get_mesh()
-    meshwrite(image_dir.parent / "sdf" / "visualization" / "rgb.ply", verts, faces, norms, colors)
-    meshwrite(image_dir.parent / "sdf" / "visualization" / "rgb_vox_space.ply", verts_vox, faces, norms, colors)
+    meshwrite(rootdir / "sdf" / vis_dirname / "rgb.ply", verts, faces, norms, colors)
+    meshwrite(rootdir / "sdf" / vis_dirname / "rgb_vox_space.ply", verts_vox, faces, norms, colors)
 
     # Get point cloud from voxel volume and save to disk (can be viewed with Meshlab)
     print("Saving point cloud to pc.ply...")
     point_cloud = tsdf_vol.get_point_cloud()
-    pcwrite(image_dir.parent / "sdf" / "visualization" / "rgb_pc.ply", point_cloud)
+    pcwrite(rootdir / "sdf" / vis_dirname / "rgb_pc.ply", point_cloud)
 
     sdf_vol, col_vol = tsdf_vol.get_volume()
     print('SDF stats:', sdf_vol.min(), sdf_vol.max(), sdf_vol.mean(), sdf_vol.std())
@@ -103,14 +93,10 @@ def fuse_room_colors(vol_bnds, image_dir, mask_dir, depth_dir, annot_dir, voxel_
     return sdf_vol, col_vol, tsdf_vol._vol_origin, vol_bnds[:, 1]
 
 
-def fuse_room_semantics(vol_bnds, sem_dir, mask_dir, depth_dir, annot_dir, voxel_size):
+def fuse_room_semantics(rootdir, vol_bnds, sems, masks, depths, annots, vis_dirname, voxel_size):
     from fusion import semantic_fusion
     print("Estimating voxel volume bounds...")
-    images = sorted([x for x in Path(sem_dir).iterdir()], key=lambda x: x.name)
-    masks = [Path(mask_dir) / x.name for x in images]
-    annots = [Path(annot_dir) / f"{x.stem}.pkl" for x in images]
-    depths = [Path(depth_dir) / f"{x.stem}.npz" for x in images]
-    n_imgs = len(images)
+    n_imgs = len(masks)
 
     print("Initializing voxel volume...")
     tsdf_vol = semantic_fusion.TSDFVolume(vol_bnds, voxel_size, n_classes=41, use_gpu=False)
@@ -121,7 +107,7 @@ def fuse_room_semantics(vol_bnds, sem_dir, mask_dir, depth_dir, annot_dir, voxel
         print("Fusing frame %d/%d" % (i + 1, n_imgs))
         # Read RGB-D image and camera pose
         mask = cv2.imread(str(masks[i]), -1).astype(bool)
-        semantics = read_front_semantics(images[i], mask)
+        semantics = read_front_semantics(sems[i], mask)
         depth_im = np.load(str(depths[i]), -1)['arr'].astype(float)
         depth_im = np.nan_to_num(depth_im, nan=0.0, posinf=0.0, neginf=0.0)
         depth_im[~mask] = 0
@@ -134,19 +120,19 @@ def fuse_room_semantics(vol_bnds, sem_dir, mask_dir, depth_dir, annot_dir, voxel
     fps = n_imgs / (time.time() - t0_elapse)
     print("Average FPS: {:.2f}".format(fps))
 
-    (sem_dir.parent / "sdf" / "visualization").mkdir(exist_ok=True, parents=True)
+    (rootdir / "sdf" / vis_dirname).mkdir(exist_ok=True, parents=True)
 
     # Get mesh from voxel volume and save to disk (can be viewed with Meshlab)
     print("Saving mesh to mesh.ply...")
     verts, verts_vox, faces, norms, colors = tsdf_vol.get_mesh()
 
-    meshwrite(sem_dir.parent / "sdf" / "visualization" / "sem.ply", verts, faces, norms, colors)
-    meshwrite(sem_dir.parent / "sdf" / "visualization" / "sem_vox_space.ply", verts_vox, faces, norms, colors)
+    meshwrite(rootdir / "sdf" / vis_dirname / "sem.ply", verts, faces, norms, colors)
+    meshwrite(rootdir / "sdf" / vis_dirname / "sem_vox_space.ply", verts_vox, faces, norms, colors)
 
     # Get point cloud from voxel volume and save to disk (can be viewed with Meshlab)
     print("Saving point cloud to pc.ply...")
     point_cloud = tsdf_vol.get_point_cloud()
-    pcwrite(sem_dir.parent / "sdf" / "visualization" / "sem_pc.ply", point_cloud)
+    pcwrite(rootdir / "sdf" / vis_dirname / "sem_pc.ply", point_cloud)
 
     sdf_vol, col_vol = tsdf_vol.get_volume()
     print('SDF stats:', sdf_vol.min(), sdf_vol.max(), sdf_vol.mean(), sdf_vol.std())
@@ -156,25 +142,30 @@ def fuse_room_semantics(vol_bnds, sem_dir, mask_dir, depth_dir, annot_dir, voxel
     return sdf_vol, col_vol, tsdf_vol._vol_origin, vol_bnds[:, 1]
 
 
-def run_fuse_room_colors_vfront(room_root, resolution, max_depth):
-    vol_bnds = get_volume_bounds(room_root / "rgb", room_root / "room_mask", room_root / "depth_npz", room_root / "annotation", max_depth, resolution)
-    sdf_vol, col_vol, vol_origin, vol_end = fuse_room_colors(vol_bnds, room_root / "rgb", room_root / "room_mask", room_root / "depth_npz", room_root / "annotation", resolution)
-    Path(room_root / "sdf").mkdir(exist_ok=True)
-    np.savez_compressed(room_root / "sdf" / f"{resolution:.2f}.npz", sdf=sdf_vol, color=col_vol, volume_origin=vol_origin, voxel_size=resolution, volume_end=vol_end)
-
-
-def run_fuse_room_semantics_vfront(room_root, resolution, max_depth):
-    vol_bnds = get_volume_bounds(room_root / "rgb", room_root / "room_mask", room_root / "depth_npz", room_root / "annotation", max_depth, resolution)
-    sdf_vol, sem_vol, vol_origin, vol_end = fuse_room_semantics(vol_bnds, room_root / "sem", room_root / "room_mask", room_root / "depth_npz", room_root / "annotation", resolution)
-    col_vol = np.load(room_root / "sdf" / f"{resolution:.2f}.npz")['color']
-    np.savez_compressed(room_root / "sdf" / f"{resolution:.2f}.npz", sdf=sdf_vol, color=col_vol, semantics=sem_vol.argmax(0), volume_origin=vol_origin, voxel_size=resolution, volume_end=vol_end)
-
-
 def run_fuse_colors_and_semantics(room_root, resolution, max_depth):
-    vol_bnds = get_volume_bounds(room_root / "rgb", room_root / "room_mask", room_root / "depth_npz", room_root / "annotation", max_depth, resolution)
-    sdf_vol, col_vol, vol_origin, vol_end = fuse_room_colors(np.copy(vol_bnds), room_root / "rgb", room_root / "room_mask", room_root / "depth_npz", room_root / "annotation", resolution)
-    _, sem_vol, _, _ = fuse_room_semantics(np.copy(vol_bnds), room_root / "sem", room_root / "room_mask", room_root / "depth_npz", room_root / "annotation", resolution)
-    np.savez_compressed(room_root / "sdf" / f"{resolution:.2f}.npz", sdf=sdf_vol, color=col_vol, semantics=sem_vol.argmax(0), volume_origin=vol_origin, voxel_size=resolution, volume_end=vol_end)
+    images = sorted([x for x in Path(room_root / "rgb").iterdir()], key=lambda x: x.name)
+    masks = [Path(room_root / "room_mask") / x.name for x in images]
+    annots = [Path(room_root / "annotation") / f"{x.stem}.pkl" for x in images]
+    depths = [Path(room_root / "depth_npz") / f"{x.stem}.npz" for x in images]
+    sems = [Path(room_root / "sem") / f"{x.stem}.png" for x in images]
+
+    vol_bnds = get_volume_bounds(masks, depths, annots, max_depth, resolution)
+
+    vis_dirname = "visualization"
+    sdf_vol, col_vol, vol_origin, vol_end = fuse_room_colors(room_root, np.copy(vol_bnds), images, masks, depths, annots, vis_dirname, resolution)
+    # _, sem_vol, _, _ = fuse_room_semantics(room_root, np.copy(vol_bnds), sems, masks, depths, annots, vis_dirname, resolution)
+    create_box((vol_bnds[:, 1] + vol_bnds[:, 0]) / 2, vol_bnds[:, 1] - vol_bnds[:, 0]).export(room_root / "sdf" / vis_dirname / "bounds.obj")
+    # np.savez_compressed(room_root / "sdf" / f"{resolution:.2f}.npz", sdf=sdf_vol, color=col_vol, semantics=sem_vol.argmax(0), volume_origin=vol_origin, voxel_size=resolution, volume_end=vol_end)
+
+    max_coverage = 0.75
+    frame_sets = pickle.load(open(room_root / "incomplete" / f"cov_{max_coverage:.2f}.pkl", "rb"))
+    for idx, frame_set in enumerate(frame_sets):
+        vis_dirname = f"visualization_{max_coverage:.2f}_{idx:02}"
+        images_set = [x for x in images if x.stem in frame_set]
+        masks_set = [x for x in masks if x.stem in frame_set]
+        depths_set = [x for x in depths if x.stem in frame_set]
+        annots_set = [x for x in annots if x.stem in frame_set]
+        fuse_room_colors(room_root, np.copy(vol_bnds), images_set, masks_set, depths_set, annots_set, vis_dirname, resolution)
 
 
 def run_fuse_instances(room_root, resolution):
@@ -187,6 +178,6 @@ def run_fuse_instances(room_root, resolution):
 if __name__ == "__main__":
     _resolution = 0.05
     _max_depth = 5
-    _root = Path("/home/yawarnihal/workspace/nerf-lightning/data/vfront/00154c06-2ee2-408a-9664-b8fd74742897/LivingRoom-17888/")
-    # run_fuse_colors_and_semantics(_root, _resolution, _max_depth)
-    run_fuse_instances(_root, _resolution)
+    _root = Path("/home/yawarnihal/workspace/nerf-lightning/data/vfront/01ba1742-4fa5-4d1e-8ba4-2f807fe6b283_LivingDiningRoom-4271/")
+    run_fuse_colors_and_semantics(_root, _resolution, _max_depth)
+    # run_fuse_instances(_root, _resolution)
